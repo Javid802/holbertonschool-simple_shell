@@ -3,14 +3,79 @@
 #include <unistd.h>
 #include <string.h>
 #include <sys/wait.h>
+#include <sys/stat.h>
 
 extern char **environ;
 
-/**
- * main - simple UNIX shell
- *
- * Return: Always 0
- */
+/* Find PATH variable */
+char *get_path()
+{
+    int i = 0;
+
+    while (environ[i])
+    {
+        if (strncmp(environ[i], "PATH=", 5) == 0)
+            return (environ[i] + 5);
+        i++;
+    }
+    return NULL;
+}
+
+/* Check if file exists and executable */
+int file_exists(char *path)
+{
+    struct stat st;
+
+    if (stat(path, &st) == 0)
+        return 1;
+
+    return 0;
+}
+
+/* Resolve command using PATH */
+char *resolve_path(char *command)
+{
+    char *path = get_path();
+    char *path_copy, *dir, *full_path;
+    int len;
+
+    if (!path)
+        return NULL;
+
+    /* If command already contains / */
+    if (strchr(command, '/'))
+    {
+        if (file_exists(command))
+            return command;
+        return NULL;
+    }
+
+    path_copy = strdup(path);
+    dir = strtok(path_copy, ":");
+
+    while (dir)
+    {
+        len = strlen(dir) + strlen(command) + 2;
+        full_path = malloc(len);
+        if (!full_path)
+            return NULL;
+
+        sprintf(full_path, "%s/%s", dir, command);
+
+        if (file_exists(full_path))
+        {
+            free(path_copy);
+            return full_path;
+        }
+
+        free(full_path);
+        dir = strtok(NULL, ":");
+    }
+
+    free(path_copy);
+    return NULL;
+}
+
 int main(void)
 {
     char *line = NULL;
@@ -21,6 +86,7 @@ int main(void)
     char *argv[100];
     char *token;
     int i;
+    char *cmd_path;
 
     while (1)
     {
@@ -42,51 +108,58 @@ int main(void)
 
         i = 0;
         token = strtok(line, " \t");
-        while (token != NULL && i < 99)
+        while (token && i < 99)
         {
             argv[i++] = token;
             token = strtok(NULL, " \t");
         }
         argv[i] = NULL;
 
-        if (argv[0] == NULL)
+        if (!argv[0])
             continue;
 
-        /* Built-in: exit */
+        /* ===== BUILTINS ===== */
+
         if (strcmp(argv[0], "exit") == 0)
         {
             free(line);
             exit(0);
         }
 
-        /* Built-in: env */
         if (strcmp(argv[0], "env") == 0)
         {
-            for (i = 0; environ[i] != NULL; i++)
+            for (i = 0; environ[i]; i++)
                 printf("%s\n", environ[i]);
             continue;
+        }
+
+        /* ===== PATH RESOLUTION ===== */
+
+        cmd_path = resolve_path(argv[0]);
+
+        if (!cmd_path)
+        {
+            printf("Command not found\n");
+            continue; /* fork edilmir */
         }
 
         pid = fork();
 
         if (pid == 0)
         {
-            if (execve(argv[0], argv, environ) == -1)
-            {
-                fprintf(stderr, "Command not found\n");
-                exit(1);
-            }
-        }
-        else if (pid > 0)
-        {
-            wait(&status);
+            execve(cmd_path, argv, environ);
+            perror("execve");
+            exit(1);
         }
         else
         {
-            perror("fork");
+            wait(&status);
         }
+
+        if (cmd_path != argv[0])
+            free(cmd_path);
     }
 
     free(line);
-    return (0);
+    return 0;
 }
