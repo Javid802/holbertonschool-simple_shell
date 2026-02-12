@@ -7,8 +7,7 @@
 
 extern char **environ;
 
-/* Find PATH variable */
-char *get_path()
+static char *get_path(void)
 {
     int i = 0;
 
@@ -21,28 +20,29 @@ char *get_path()
     return NULL;
 }
 
-/* Check if file exists and executable */
-int file_exists(char *path)
+static int file_exists(char *path)
 {
     struct stat st;
 
     if (stat(path, &st) == 0)
         return 1;
-
     return 0;
 }
 
-/* Resolve command using PATH */
-char *resolve_path(char *command)
+/* Resolve command using PATH. Returns:
+ * - command itself if it already contains '/'
+ * - malloc'ed full path if found in PATH
+ * - NULL if not found
+ */
+static char *resolve_path(char *command)
 {
     char *path = get_path();
     char *path_copy, *dir, *full_path;
     int len;
 
-    if (!path)
+    if (!command)
         return NULL;
 
-    /* If command already contains / */
     if (strchr(command, '/'))
     {
         if (file_exists(command))
@@ -50,22 +50,30 @@ char *resolve_path(char *command)
         return NULL;
     }
 
-    path_copy = strdup(path);
-    dir = strtok(path_copy, ":");
+    if (!path)
+        return NULL;
 
+    path_copy = strdup(path);
+    if (!path_copy)
+        return NULL;
+
+    dir = strtok(path_copy, ":");
     while (dir)
     {
-        len = strlen(dir) + strlen(command) + 2;
+        len = (int)strlen(dir) + (int)strlen(command) + 2;
         full_path = malloc(len);
         if (!full_path)
+        {
+            free(path_copy);
             return NULL;
+        }
 
         sprintf(full_path, "%s/%s", dir, command);
 
         if (file_exists(full_path))
         {
             free(path_copy);
-            return full_path;
+            return full_path; /* malloc'ed */
         }
 
         free(full_path);
@@ -87,6 +95,7 @@ int main(void)
     char *token;
     int i;
     char *cmd_path;
+    int last_status = 0; /* <-- IMPORTANT */
 
     while (1)
     {
@@ -100,7 +109,7 @@ int main(void)
         if (nread == -1)
         {
             free(line);
-            exit(0);
+            exit(last_status); /* optional: exit with last status */
         }
 
         if (nread > 0 && line[nread - 1] == '\n')
@@ -123,37 +132,50 @@ int main(void)
         if (strcmp(argv[0], "exit") == 0)
         {
             free(line);
-            exit(0);
+            exit(last_status); /* <-- FIX: exit with last command status */
         }
 
         if (strcmp(argv[0], "env") == 0)
         {
             for (i = 0; environ[i]; i++)
                 printf("%s\n", environ[i]);
+            last_status = 0;
             continue;
         }
 
         /* ===== PATH RESOLUTION ===== */
 
         cmd_path = resolve_path(argv[0]);
-
         if (!cmd_path)
         {
-            printf("Command not found\n");
+            /* command not found => usual status is 127 */
+            fprintf(stderr, "%s: not found\n", argv[0]);
+            last_status = 127;
             continue; /* fork edilmir */
         }
 
         pid = fork();
-
         if (pid == 0)
         {
             execve(cmd_path, argv, environ);
             perror("execve");
-            exit(1);
+            exit(126);
+        }
+        else if (pid > 0)
+        {
+            wait(&status);
+
+            if (WIFEXITED(status))
+                last_status = WEXITSTATUS(status);
+            else if (WIFSIGNALED(status))
+                last_status = 128 + WTERMSIG(status);
+            else
+                last_status = 1;
         }
         else
         {
-            wait(&status);
+            perror("fork");
+            last_status = 1;
         }
 
         if (cmd_path != argv[0])
