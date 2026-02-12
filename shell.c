@@ -37,7 +37,7 @@ int main(void)
             exit(0);
         }
 
-        if (line[nread - 1] == '\n')
+        if (nread > 0 && line[nread - 1] == '\n')
             line[nread - 1] = '\0';
 
         i = 0;
@@ -52,6 +52,21 @@ int main(void)
         if (argv[0] == NULL)
             continue;
 
+        /* Built-in: exit */
+        if (strcmp(argv[0], "exit") == 0)
+        {
+            free(line);
+            exit(0);
+        }
+
+        /* Built-in: env */
+        if (strcmp(argv[0], "env") == 0)
+        {
+            for (i = 0; environ[i] != NULL; i++)
+                printf("%s\n", environ[i]);
+            continue;
+        }
+
         pid = fork();
 
         if (pid == 0)
@@ -62,9 +77,13 @@ int main(void)
                 exit(1);
             }
         }
-        else
+        else if (pid > 0)
         {
             wait(&status);
+        }
+        else
+        {
+            perror("fork");
         }
     }
 
