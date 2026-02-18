@@ -3,185 +3,185 @@
 #include <unistd.h>
 #include <string.h>
 #include <sys/wait.h>
-#include <sys/stat.h>
+#include "shell.h"
 
 extern char **environ;
 
-static char *get_path(void)
-{
-    int i = 0;
-
-    while (environ[i])
-    {
-        if (strncmp(environ[i], "PATH=", 5) == 0)
-            return (environ[i] + 5);
-        i++;
-    }
-    return NULL;
-}
-
-static int file_exists(char *path)
-{
-    struct stat st;
-
-    if (stat(path, &st) == 0)
-        return 1;
-    return 0;
-}
-
-/* Resolve command using PATH. Returns:
- * - command itself if it already contains '/'
- * - malloc'ed full path if found in PATH
- * - NULL if not found
+/**
+ * find_command - search command in PATH
+ * @command: command name
+ *
+ * Return: full path if found, otherwise NULL
  */
-static char *resolve_path(char *command)
+char *find_command(char *command)
 {
-    char *path = get_path();
-    char *path_copy, *dir, *full_path;
-    int len;
+	char *path_env;
+	char *path_copy;
+	char *dir;
+	static char full_path[1024];
+	int i;
 
-    if (!command)
-        return NULL;
+	if (strchr(command, '/'))
+	{
+		if (access(command, X_OK) == 0)
+			return (command);
+		return (NULL);
+	}
 
-    if (strchr(command, '/'))
-    {
-        if (file_exists(command))
-            return command;
-        return NULL;
-    }
+	path_env = NULL;
+	i = 0;
 
-    if (!path)
-        return NULL;
+	while (environ[i] != NULL)
+	{
+		if (strncmp(environ[i], "PATH=", 5) == 0)
+		{
+			path_env = environ[i] + 5;
+			break;
+		}
+		i++;
+	}
 
-    path_copy = strdup(path);
-    if (!path_copy)
-        return NULL;
+	if (path_env == NULL || path_env[0] == '\0')
+		return (NULL);
 
-    dir = strtok(path_copy, ":");
-    while (dir)
-    {
-        len = (int)strlen(dir) + (int)strlen(command) + 2;
-        full_path = malloc(len);
-        if (!full_path)
-        {
-            free(path_copy);
-            return NULL;
-        }
+	path_copy = strdup(path_env);
+	if (path_copy == NULL)
+		return (NULL);
 
-        sprintf(full_path, "%s/%s", dir, command);
+	dir = strtok(path_copy, ":");
 
-        if (file_exists(full_path))
-        {
-            free(path_copy);
-            return full_path; /* malloc'ed */
-        }
+	while (dir != NULL)
+	{
+		snprintf(full_path, sizeof(full_path), "%s/%s", dir, command);
 
-        free(full_path);
-        dir = strtok(NULL, ":");
-    }
+		if (access(full_path, X_OK) == 0)
+		{
+			free(path_copy);
+			return (full_path);
+		}
 
-    free(path_copy);
-    return NULL;
+		dir = strtok(NULL, ":");
+	}
+
+	free(path_copy);
+	return (NULL);
 }
 
+/**
+ * builtin_env - print all environment variables
+ */
+void builtin_env(void)
+{
+	int i;
+
+	i = 0;
+	while (environ[i] != NULL)
+	{
+		printf("%s\n", environ[i]);
+		i++;
+	}
+}
+
+/**
+ * main - simple shell
+ *
+ * Return: last command exit status
+ */
 int main(void)
 {
-    char *line = NULL;
-    size_t len = 0;
-    ssize_t nread;
-    pid_t pid;
-    int status;
-    char *argv[100];
-    char *token;
-    int i;
-    char *cmd_path;
-    int last_status = 0; /* <-- IMPORTANT */
+	char *line;
+	size_t len;
+	ssize_t nread;
+	pid_t pid;
+	int status;
+	char *argv[100];
+	char *token;
+	int i;
+	char *cmd_path;
 
-    while (1)
-    {
-        if (isatty(STDIN_FILENO))
-        {
-            printf("newshell$ ");
-            fflush(stdout);
-        }
+	line = NULL;
+	len = 0;
+	status = 0;
 
-        nread = getline(&line, &len, stdin);
-        if (nread == -1)
-        {
-            free(line);
-            exit(last_status); /* optional: exit with last status */
-        }
+	while (1)
+	{
+		if (isatty(STDIN_FILENO))
+		{
+			printf("newshell$ ");
+			fflush(stdout);
+		}
 
-        if (nread > 0 && line[nread - 1] == '\n')
-            line[nread - 1] = '\0';
+		nread = getline(&line, &len, stdin);
+		if (nread == -1)
+		{
+			free(line);
+			exit(status);
+		}
 
-        i = 0;
-        token = strtok(line, " \t");
-        while (token && i < 99)
-        {
-            argv[i++] = token;
-            token = strtok(NULL, " \t");
-        }
-        argv[i] = NULL;
+		if (line[nread - 1] == '\n')
+			line[nread - 1] = '\0';
 
-        if (!argv[0])
-            continue;
+		i = 0;
+		token = strtok(line, " \t");
 
-        /* ===== BUILTINS ===== */
+		while (token != NULL && i < 99)
+		{
+			argv[i] = token;
+			i++;
+			token = strtok(NULL, " \t");
+		}
+		argv[i] = NULL;
 
-        if (strcmp(argv[0], "exit") == 0)
-        {
-            free(line);
-            exit(last_status); /* <-- FIX: exit with last command status */
-        }
+		if (argv[0] == NULL)
+			continue;
 
-        if (strcmp(argv[0], "env") == 0)
-        {
-            for (i = 0; environ[i]; i++)
-                printf("%s\n", environ[i]);
-            last_status = 0;
-            continue;
-        }
+		if (strcmp(argv[0], "exit") == 0)
+		{
+			free(line);
+			exit(status);
+		}
 
-        /* ===== PATH RESOLUTION ===== */
+		if (strcmp(argv[0], "env") == 0)
+		{
+			builtin_env();
+			status = 0;
+			continue;
+		}
 
-        cmd_path = resolve_path(argv[0]);
-        if (!cmd_path)
-        {
-            /* command not found => usual status is 127 */
-            fprintf(stderr, "%s: not found\n", argv[0]);
-            last_status = 127;
-            continue; /* fork edilmir */
-        }
+		cmd_path = find_command(argv[0]);
 
-        pid = fork();
-        if (pid == 0)
-        {
-            execve(cmd_path, argv, environ);
-            perror("execve");
-            exit(126);
-        }
-        else if (pid > 0)
-        {
-            wait(&status);
+		if (cmd_path == NULL)
+		{
+			fprintf(stderr, "./hsh: 1: %s: not found\n", argv[0]);
+			status = 127;
+			continue;
+		}
 
-            if (WIFEXITED(status))
-                last_status = WEXITSTATUS(status);
-            else if (WIFSIGNALED(status))
-                last_status = 128 + WTERMSIG(status);
-            else
-                last_status = 1;
-        }
-        else
-        {
-            perror("fork");
-            last_status = 1;
-        }
+		pid = fork();
 
-        if (cmd_path != argv[0])
-            free(cmd_path);
-    }
+		if (pid == -1)
+		{
+			perror("fork");
+			status = 1;
+			continue;
+		}
 
-    free(line);
-    return 0;
+		if (pid == 0)
+		{
+			if (execve(cmd_path, argv, environ) == -1)
+			{
+				perror("execve");
+				exit(1);
+			}
+		}
+		else
+		{
+			waitpid(pid, &status, 0);
+			if (WIFEXITED(status))
+				status = WEXITSTATUS(status);
+		}
+	}
+
+	free(line);
+	return (status);
 }
