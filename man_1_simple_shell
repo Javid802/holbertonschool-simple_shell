@@ -1,0 +1,27 @@
+.TH hsh 1 "February 2026" "simple_shell" "User Commands"
+
+.SH NAME
+hsh \- simple UNIX command interpreter
+
+.SH SYNOPSIS
+.B hsh
+
+.SH DESCRIPTION
+hsh is a simple UNIX command interpreter.
+
+It reads commands from standard input and executes them.
+
+The shell supports both interactive and non-interactive mode.
+
+.SH USAGE
+Run:
+
+.B ./hsh
+
+Type commands and press ENTER.
+
+Example:
+.B /bin/ls
+
+.SH AUTHORS
+Written by Aysu Mustafazade, Salim Haciyev
